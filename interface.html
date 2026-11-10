@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fantasma</title>
+<style>
+:root{--bg:#07131d;--painel:#0d2233;--linha:#17384f;--texto:#d8eef7;--suave:#8fb0c0;--ciano:#5fe0ff;--ambar:#ffb457;--menta:#9dffc9}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:radial-gradient(120% 80% at 50% 0%,#0c2638 0%,var(--bg) 62%);color:var(--texto);font:16px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif;display:flex;justify-content:center;padding:16px 16px 12px}
+main{width:100%;max-width:640px;display:flex;flex-direction:column;gap:14px;height:100%}
+#orbe{display:block;width:min(400px,52vh,90vw);height:min(400px,52vh,90vw);margin:0 auto;flex:none}
+#rotulo{text-align:center;color:var(--suave);font-size:15px;min-height:24px;margin:0;flex:none}
+#log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px 2px}
+#log:empty::before{content:"Diga “ei Fantasma” ou escreva abaixo.";color:var(--suave);margin:auto}
+.msg{max-width:86%;padding:10px 14px;border-radius:14px;background:var(--painel);border:1px solid var(--linha);overflow-wrap:anywhere}
+.msg.voce{align-self:flex-end;background:#10374d}
+.msg.jarvis{align-self:flex-start}
+#lateral{position:fixed;top:12px;left:12px;z-index:1;background:transparent;color:var(--suave);border:1px solid var(--linha);padding:6px 12px;font-size:14px;font-weight:400}
+dialog{background:var(--painel);color:var(--texto);border:1px solid var(--linha);border-radius:14px;padding:18px 22px;max-width:min(420px,90vw);text-align:center}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.destaque{font-size:20px;font-weight:600;color:var(--ciano);overflow-wrap:anywhere}
+#desligar{position:fixed;top:12px;right:12px;z-index:1;background:transparent;color:var(--suave);border:1px solid var(--linha);padding:6px 12px;font-size:14px;font-weight:400}
+#parar{align-self:center;flex:none;background:transparent;color:var(--ambar);border:1px solid var(--ambar);padding:8px 16px}
+form{display:flex;gap:8px;flex:none}
+input{flex:1;min-width:0;padding:12px 14px;border-radius:12px;border:1px solid var(--linha);background:var(--painel);color:var(--texto);font:inherit}
+button{padding:12px 18px;border-radius:12px;border:0;background:var(--ciano);color:#052030;font:inherit;font-weight:600;cursor:pointer}
+input:focus-visible,button:focus-visible{outline:2px solid var(--menta);outline-offset:2px}
+</style>
+</head>
+<body>
+<button id="desligar" type="button">Desligar</button>
+<button id="lateral" type="button"></button>
+<dialog id="celular"><div id="celular-info"></div><form method="dialog"><button>Fechar</button></form></dialog>
+<main>
+  <canvas id="orbe" width="600" height="600" aria-hidden="true"></canvas>
+  <p id="rotulo" role="status">Conectando…</p>
+  <button id="parar" type="button" hidden>Parar de falar</button>
+  <div id="log" aria-live="polite"></div>
+  <form id="form">
+    <input id="campo" autocomplete="off" placeholder="Escreva um comando" aria-label="Comando para o Fantasma">
+    <button type="submit">Enviar</button>
+  </form>
+</main>
+<script>
+const log = document.getElementById('log'), rotulo = document.getElementById('rotulo');
+const ROTULOS = {aguardando:'Aguardando “ei Fantasma”', ouvindo:'Ouvindo…', pensando:'Pensando…', falando:'Falando…', carregando:'Carregando o Fantasma… (pode levar alguns segundos)', erro:'Erro ao iniciar. Veja o arquivo jarvis.log.'};
+let ultimo = '';
+const parar = document.getElementById('parar');
+
+async function atualizar() {
+  try {
+    const resposta = await fetch('/estado');
+    if (resposta.status === 401) { location.reload(); return; }  // sessão expirou: volta ao login
+    const e = await resposta.json();
+    document.body.dataset.estado = e.status;
+    rotulo.textContent = ROTULOS[e.status] || e.status;
+    parar.hidden = !(e.status === 'falando' || e.status === 'pensando');
+    falarNoCelular(e.mensagens);
+    const ultima = e.mensagens.map(m => m.papel).lastIndexOf('voce');  // só a troca mais recente
+    const falas = ultima < 0 ? [] : e.mensagens.slice(ultima);
+    const chave = JSON.stringify(falas);
+    if (chave !== ultimo) {
+      ultimo = chave;
+      log.replaceChildren(...falas.map(m => {
+        const d = document.createElement('div');
+        d.className = 'msg ' + m.papel;
+        d.textContent = m.texto;
+        return d;
+      }));
+      log.scrollTop = log.scrollHeight;
+    }
+  } catch {
+    delete document.body.dataset.estado;
+    rotulo.textContent = 'Fantasma desligado ou sem conexão. Abra o iniciar_fantasma para ligar.';
+  }
+}
+
+document.getElementById('form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const campo = document.getElementById('campo'), texto = campo.value.trim();
+  if (!texto) return;
+  campo.value = '';
+  await fetch('/enviar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({texto})});
+  atualizar();
+});
+
+document.getElementById('desligar').addEventListener('click', () => {
+  if (confirm('Desligar o Fantasma?')) fetch('/encerrar', {method:'POST'});
+});
+
+// ---- Celular: abre pelo mesmo endereço; lê as respostas em voz alta se você ativar ----
+const remoto = !['127.0.0.1', 'localhost'].includes(location.hostname);
+const lateral = document.getElementById('lateral'), dialogo = document.getElementById('celular');
+let vozCelular = false, iniciou = false, ultimoFalado = -1;
+
+function falarNoCelular(msgs) {
+  const ultimo = msgs[msgs.length - 1];
+  if (!iniciou) { iniciou = true; ultimoFalado = ultimo ? ultimo.id : -1; return; }  // não lê o que já existia
+  if (!ultimo || ultimo.papel !== 'jarvis' || ultimo.id <= ultimoFalado) return;
+  ultimoFalado = ultimo.id;
+  const pedido = [...msgs].reverse().find(m => m.papel === 'voce');
+  if (remoto && vozCelular && pedido && pedido.via === 'celular' && 'speechSynthesis' in window) {
+    const fala = new SpeechSynthesisUtterance(ultimo.texto);
+    fala.lang = 'pt-BR';
+    speechSynthesis.speak(fala);
+  }
+}
+
+if (remoto) {
+  document.getElementById('desligar').hidden = true;
+  lateral.textContent = 'Ler respostas: desligado';
+  lateral.addEventListener('click', () => {
+    vozCelular = !vozCelular;
+    lateral.textContent = 'Ler respostas: ' + (vozCelular ? 'ligado' : 'desligado');
+    if (vozCelular && 'speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance(''));  // libera o áudio
+  });
+} else {
+  lateral.textContent = 'Celular';
+  lateral.addEventListener('click', async () => {
+    const info = await (await fetch('/acesso')).json(), corpo = document.getElementById('celular-info');
+    const linha = (texto, classe) => { const p = document.createElement('p'); p.textContent = texto; if (classe) p.className = classe; return p; };
+    corpo.replaceChildren(...(info.ativo
+      ? [linha('No celular, conectado ao mesmo Wi-Fi, abra:'), linha(info.url, 'destaque'), linha('e digite o PIN:'), linha(info.pin, 'destaque')]
+      : [linha('O acesso pelo celular está desligado (PERMITIR_CELULAR no jarvis_web.py).')]));
+    dialogo.showModal();
+  });
+}
+
+function pararFala() {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  fetch('/parar', {method:'POST'}).then(atualizar);
+}
+parar.addEventListener('click', pararFala);
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape') pararFala(); });
+
+
+// ---- Orbe: esfera de pontos em 3D com ondas completas ao redor ----
+const cv = document.getElementById('orbe'), ctx = cv.getContext('2d');
+const N = 800, R = 185, C = cv.width / 2;
+const pontos = Array.from({length: N}, (_, i) => {   // pontos espalhados uniformemente na esfera
+  const y = 1 - 2 * (i + .5) / N, r = Math.sqrt(1 - y * y), t = i * 2.399963;
+  return {x: Math.cos(t) * r, y, z: Math.sin(t) * r, f: Math.random() * 6.28};
+});
+const ESTADOS = {
+  aguardando: {cor: [95, 224, 255],  giro: .25, onda: 6,   vibra: .02},
+  ouvindo:    {cor: [157, 255, 201], giro: .8,  onda: 1.6, vibra: .05},
+  pensando:   {cor: [255, 180, 87],  giro: 1.7, onda: 2.6, vibra: .04},
+  falando:    {cor: [95, 224, 255],  giro: .6,  onda: 1.2, vibra: .09},
+  carregando: {cor: [255, 180, 87],  giro: .5,  onda: 3,   vibra: .03},
+  erro:       {cor: [255, 110, 110], giro: .1,  onda: 8,   vibra: .01},
+};
+const SEM_CONEXAO = {cor: [143, 176, 192], giro: .15, onda: 8, vibra: .01};
+const calmo = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let ang = 0, cor = [...SEM_CONEXAO.cor], inicio = performance.now(), antes = inicio;
+
+function desenhar(agora) {
+  const dt = (agora - antes) / 1000, t = (agora - inicio) / 1000;
+  antes = agora;
+  const e = ESTADOS[document.body.dataset.estado] || SEM_CONEXAO;
+  cor = cor.map((v, i) => v + (e.cor[i] - v) * Math.min(1, dt * 4));  // a cor muda suavemente
+  ang += e.giro * dt * (calmo ? .15 : 1);
+  const [r, g, b] = cor.map(Math.round);
+  const sen = Math.sin(ang), cos = Math.cos(ang);
+  const respira = 1 + (calmo ? 0 : Math.sin(t * 2) * e.vibra);
+
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  for (const p of pontos) {
+    const x = p.x * cos + p.z * sen, z = -p.x * sen + p.z * cos;       // gira em torno do eixo vertical
+    const ondula = 1 + (calmo ? 0 : Math.sin(t * 6 + p.y * 5 + p.f * .3) * e.vibra * .8);
+    const prof = (z + 1) / 2;                                          // 0 = atrás, 1 = na frente
+    const raio = R * respira * ondula;
+    ctx.fillStyle = `rgba(${r},${g},${b},${.15 + .85 * prof})`;
+    ctx.beginPath();
+    ctx.arc(C + x * raio, C + p.y * raio, 1.3 + 3 * prof, 0, 6.2832);
+    ctx.fill();
+  }
+  if (!calmo) for (let k = 0; k < 2; k++) {                            // ondas: anéis completos ao redor
+    const fase = ((t / e.onda) + k / 2) % 1;
+    ctx.strokeStyle = `rgba(${r},${g},${b},${.45 * (1 - fase)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(C, C, R * (1.08 + .42 * fase), 0, 6.2832);
+    ctx.stroke();
+  }
+  requestAnimationFrame(desenhar);
+}
+requestAnimationFrame(desenhar);
+
+setInterval(atualizar, 600);
+atualizar();
+</script>
+</body>
+</html>

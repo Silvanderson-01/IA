@@ -1,0 +1,25 @@
+﻿**********************
+Início da transcrição do Windows PowerShell
+Hora de início: 20261107195036
+Nome de Usuário: PC\Admin
+Executar como Usuário: PC\Admin
+Nome da Configuração: 
+Computador: PC (Microsoft Windows NT 10.0.26100.0)
+Aplicativo Host: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe
+ID do Processo: 18904
+PSVersion: 5.1.26100.9711
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9711
+BuildVersion: 10.0.26100.9711
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcrição iniciada, o arquivo de saída é .\log.txt
+PS C:\jarvis> python seu_arquivo.py
+
+PS C:\jarvis> python resposta_ollama.py
+
+PS C:\jarvis> python 02_teste.py
+
